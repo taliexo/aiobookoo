@@ -1,0 +1,39 @@
+[project]
+name = "aiobookoo"
+version = "0.1.0"
+license = { text = "MIT" }
+description = "An async implementation of PyBookoo"
+readme = "README.md"
+authors = [
+    { name = "Makerwolf", email = "160181889+makerwolf@users.noreply.github.com" },
+]
+maintainers = [
+    { name = "Makerwolf", email = "160181889+makerwolf@users.noreply.github.com" },
+]
+keywords = ["Bookoo", "Bluetooth", "api", "async", "client"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = ["bleak >= 0.20.2"]
+requires-python = ">= 3.12"
+
+[project.urls]
+Homepage = "https://github.com/makerwolf/aiobookoo"
+Repository = "https://github.com/makerwolf/aiobookoo"
+Documentation = "https://github.com/makerwolf/aiobookoo"
+
+[project.optional-dependencies]
+dev = [
+    "covdefaults == 2.3.0",
+    "coverage == 7.6.7",
+    "syrupy == 4.7.2",
+    "pytest == 8.3.3",
+    "pytest-asyncio == 0.24.0",
+    "pytest-cov == 6.0.0",
+]

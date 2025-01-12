@@ -1,0 +1,1 @@
+from .bookooscale import BookooScale
