@@ -1,16 +1,11 @@
-"""Helper functions, taken from pybookoo."""
+"""Helper functions, taken and adapted from aioacia."""
 
 import logging
 
 from bleak import BleakClient, BleakScanner, BLEDevice
 from bleak.exc import BleakDeviceNotFoundError, BleakError
 
-from .const import (
-    CHARACTERISTIC_UUID_WEIGHT,
-    CMD_BYTE1_PRODUCT_NUMBER,
-    CMD_BYTE2_TYPE,
-    SCALE_START_NAMES,
-)
+from .const import CHARACTERISTIC_UUID_WEIGHT, SCALE_START_NAMES
 from .exceptions import BookooDeviceNotFound, BookooError, BookooUnknownDevice
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,27 +53,3 @@ async def is_bookoo_scale(address_or_ble_device: str | BLEDevice) -> bool:
         return True
 
     raise BookooUnknownDevice
-
-
-def encode(msg_type: int, payload: bytearray | list[int]) -> bytearray:
-    """Encode a message to the scale."""
-    byte_msg = bytearray(5 + len(payload))
-
-    byte_msg[0] = CMD_BYTE1_PRODUCT_NUMBER
-    byte_msg[1] = CMD_BYTE2_TYPE
-    byte_msg[2] = msg_type
-    cksum1 = 0
-    cksum2 = 0
-
-    for i, p_byte in enumerate(payload):
-        val = p_byte & 0xFF
-        byte_msg[3 + i] = val
-        if i % 2 == 0:
-            cksum1 += val
-        else:
-            cksum2 += val
-
-    byte_msg[len(payload) + 3] = cksum1 & 0xFF
-    byte_msg[len(payload) + 4] = cksum2 & 0xFF
-
-    return byte_msg
