@@ -2,7 +2,7 @@
 name = "aiobookoo"
 version = "0.1.0"
 license = { text = "MIT" }
-description = "An async implementation of PyBookoo"
+description = "A bookoo port of aioacaia"
 readme = "README.md"
 authors = [
     { name = "Makerwolf", email = "160181889+makerwolf@users.noreply.github.com" },
@@ -12,7 +12,7 @@ maintainers = [
 ]
 keywords = ["Bookoo", "Bluetooth", "api", "async", "client"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Beta",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
     "Natural Language :: English",
