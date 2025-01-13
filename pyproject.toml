@@ -12,7 +12,7 @@ maintainers = [
 ]
 keywords = ["Bookoo", "Bluetooth", "api", "async", "client"]
 classifiers = [
-    "Development Status :: 3 - Beta",
+    "Development Status :: 4 - Beta",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
     "Natural Language :: English",
