@@ -1,14 +1,14 @@
 [project]
-name = "aiobookoo"
-version = "0.1.0"
+name = "aiobookoov2"
+version = "0.2.0"
 license = { text = "MIT" }
-description = "A bookoo port of aioacaia"
+description = "Async Python library for Bookoo BLE scales (v2 fork by taliexo)"
 readme = "README.md"
 authors = [
-    { name = "Makerwolf", email = "160181889+makerwolf@users.noreply.github.com" },
+    { name = "taliexo", email = "mail@taliexo.com" },
 ]
 maintainers = [
-    { name = "Makerwolf", email = "160181889+makerwolf@users.noreply.github.com" },
+    { name = "taliexo", email = "mail@taliexo.com" },
 ]
 keywords = ["Bookoo", "Bluetooth", "api", "async", "client"]
 classifiers = [
@@ -24,9 +24,9 @@ dependencies = ["bleak >= 0.20.2"]
 requires-python = ">= 3.12"
 
 [project.urls]
-Homepage = "https://github.com/makerwolf/aiobookoo"
-Repository = "https://github.com/makerwolf/aiobookoo"
-Documentation = "https://github.com/makerwolf/aiobookoo"
+Homepage = "https://github.com/taliexo/aiobookoo"
+Repository = "https://github.com/taliexo/aiobookoo"
+Documentation = "https://github.com/taliexo/aiobookoo"
 
 [project.optional-dependencies]
 dev = [
