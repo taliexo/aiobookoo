@@ -77,13 +77,25 @@ def decode(byte_msg: bytearray) -> tuple[BookooMessage | dict | None, bytearray]
     """
 
     # Check for Weight Characteristic Message (typically 20 bytes)
+    if len(byte_msg) >= 2: # Ensure we can access byte_msg[0] and byte_msg[1]
+        _LOGGER.debug(
+            "Pre-weight-check: len=%d, byte0=0x%02X, byte1=0x%02X, CONST_W1=0x%02X, CONST_W2=0x%02X",
+            len(byte_msg),
+            byte_msg[0],
+            byte_msg[1],
+            WEIGHT_BYTE1,
+            WEIGHT_BYTE2
+        )
     if len(byte_msg) == 20 and byte_msg[0] == WEIGHT_BYTE1 and byte_msg[1] == WEIGHT_BYTE2:
         # Perform checksum for weight message before parsing
         checksum = 0
         for byte_val in byte_msg[:-1]:
             checksum ^= byte_val
         if checksum != byte_msg[-1]:
-            _LOGGER.warning("Weight message checksum mismatch: %s", byte_msg.hex())
+            _LOGGER.warning(
+                "Weight message checksum mismatch. Calculated: 0x%02X, Received: 0x%02X. Payload: %s", 
+                checksum, byte_msg[-1], byte_msg.hex()
+            )
             # Decide if to raise BookooMessageError or return None
             # For now, let's be strict, as BookooMessage init will also check
             # raise BookooMessageError(byte_msg, "Checksum mismatch in decode function for weight")
