@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Maintain dependencies for pip (Python)
+  - package-ecosystem: "pip"
+    directory: "/" # Assumes pyproject.toml or requirements.txt is in the root
+    schedule:
+      interval: "daily"
+    target-branch: "main" # Or your primary development branch
+    reviewers:
+      - "taliexo" # Your GitHub username
+    labels:
+      - "dependencies"
+      - "python"
+    # For aiobookoo, if you want to group dev dependency updates:
+    # groups:
+    #   dev-dependencies:
+    #     dependency-type: "development"
+
+  # Maintain dependencies for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/" # Checks for actions in .github/workflows
+    schedule:
+      interval: "daily"
+    target-branch: "main"
+    reviewers:
+      - "taliexo"
+    labels:
+      - "dependencies"
+      - "github_actions"
