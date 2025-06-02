@@ -2,8 +2,8 @@ import pytest
 import logging # For caplog
 from unittest.mock import patch, MagicMock
 
-from aiobookoo.decode import decode, BookooMessage
-from aiobookoo.const import (
+from aiobookoov2.decode import decode, BookooMessage
+from aiobookoov2.const import (
     WEIGHT_BYTE1,
     WEIGHT_BYTE2,
     CMD_BYTE1_PRODUCT_NUMBER,
@@ -11,7 +11,7 @@ from aiobookoo.const import (
     CMD_BYTE3_AUTO_TIMER_EVENT_START,
     CMD_BYTE3_AUTO_TIMER_EVENT_STOP
 )
-from aiobookoo.exceptions import BookooMessageError # For completeness, though decode might return None now
+from aiobookoov2.exceptions import BookooMessageError # For completeness, though decode might return None now
 
 # Helper to calculate checksum
 def calculate_checksum(payload_without_checksum: bytes) -> int:
