@@ -1,7 +1,7 @@
 """Helper functions, taken and adapted from aioacia."""
 
 import logging
-from typing import cast, List, Callable # Added List and Callable for other hints
+from typing import cast, List  # Added List and Callable for other hints
 
 from bleak import BleakClient, BleakScanner, BLEDevice
 from bleak.exc import BleakDeviceNotFoundError, BleakError
@@ -12,7 +12,9 @@ from .exceptions import BookooDeviceNotFound, BookooError, BookooUnknownDevice
 _LOGGER = logging.getLogger(__name__)
 
 
-async def find_bookoo_devices(timeout: float = 10.0, scanner: BleakScanner | None = None) -> list[BLEDevice]:
+async def find_bookoo_devices(
+    timeout: float = 10.0, scanner: BleakScanner | None = None
+) -> list[BLEDevice]:
     """Find BOOKOO devices by scanning and then filtering by name."""
     _LOGGER.debug("Attempting to find Bookoo devices with timeout: %s s", timeout)
 
@@ -29,16 +31,30 @@ async def find_bookoo_devices(timeout: float = 10.0, scanner: BleakScanner | Non
 
     if not all_devices:
         _LOGGER.debug("No BLE devices found by the scan function.")
-        return [] # Return empty list if scan found nothing
+        return []  # Return empty list if scan found nothing
 
-    _LOGGER.debug("Scan found %d BLE devices. Filtering for Bookoo scales by name prefixes: %s", len(all_devices), SCALE_START_NAMES)
+    _LOGGER.debug(
+        "Scan found %d BLE devices. Filtering for Bookoo scales by name prefixes: %s",
+        len(all_devices),
+        SCALE_START_NAMES,
+    )
     bookoo_devices: list[BLEDevice] = []
     for device in all_devices:
-        if device.name and any(device.name.startswith(name_prefix) for name_prefix in SCALE_START_NAMES):
-            _LOGGER.debug("Found matching Bookoo device: Name='%s', Address='%s'", device.name, device.address)
+        if device.name and any(
+            device.name.startswith(name_prefix) for name_prefix in SCALE_START_NAMES
+        ):
+            _LOGGER.debug(
+                "Found matching Bookoo device: Name='%s', Address='%s'",
+                device.name,
+                device.address,
+            )
             bookoo_devices.append(device)
         else:
-            _LOGGER.debug("Device Name='%s' (Address='%s') did not match Bookoo prefixes.", device.name, device.address)
+            _LOGGER.debug(
+                "Device Name='%s' (Address='%s') did not match Bookoo prefixes.",
+                device.name,
+                device.address,
+            )
 
     if not bookoo_devices:
         _LOGGER.debug("No devices found matching Bookoo name prefixes after filtering.")
@@ -54,7 +70,12 @@ async def scan(scanner: BleakScanner, timeout: float) -> list[BLEDevice]:
     devices = await scanner.discover(timeout=timeout)
     for d in devices:
         # Log all found devices for debugging, filtering happens elsewhere or not at all in this func
-        _LOGGER.debug("Discovered device: Name=%s, Address=%s, Details=%s", d.name, d.address, d.details)
+        _LOGGER.debug(
+            "Discovered device: Name=%s, Address=%s, Details=%s",
+            d.name,
+            d.address,
+            d.details,
+        )
     return cast(List[BLEDevice], devices)
 
 

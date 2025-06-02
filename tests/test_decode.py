@@ -1,4 +1,5 @@
 import logging  # For caplog
+from pytest import LogCaptureFixture
 
 from aiobookoov2.decode import decode, BookooMessage
 from aiobookoov2.const import (
@@ -105,7 +106,9 @@ AUTO_TIMER_STOP_PAYLOAD = AUTO_TIMER_STOP_PAYLOAD_NO_CS[:-1] + bytes(
 
 
 class TestAioBookooDecode:
-    def test_decode_valid_weight_message(self, caplog):  # Add caplog
+    def test_decode_valid_weight_message(
+        self, caplog: LogCaptureFixture
+    ) -> None:  # Add caplog
         caplog.set_level(logging.DEBUG, logger="aiobookoo.decode")  # Set level
         msg, remaining = decode(VALID_WEIGHT_PAYLOAD)
         assert isinstance(msg, BookooMessage)
@@ -115,31 +118,31 @@ class TestAioBookooDecode:
         assert msg.battery == 100
         assert len(remaining) == 0
 
-    def test_decode_auto_timer_start(self):
+    def test_decode_auto_timer_start(self) -> None:
         msg, remaining = decode(AUTO_TIMER_START_PAYLOAD)
         assert msg == {"type": "auto_timer", "event": "start"}
         assert len(remaining) == 0
 
-    def test_decode_auto_timer_stop(self):
+    def test_decode_auto_timer_stop(self) -> None:
         msg, remaining = decode(AUTO_TIMER_STOP_PAYLOAD)
         assert msg == {"type": "auto_timer", "event": "stop"}
         assert len(remaining) == 0
 
-    def test_decode_weight_checksum_error(self):
+    def test_decode_weight_checksum_error(self) -> None:
         invalid_payload = bytearray(VALID_WEIGHT_PAYLOAD)
         invalid_payload[-1] = (invalid_payload[-1] + 1) % 256  # Corrupt checksum
         msg, remaining = decode(invalid_payload)
         assert msg is None
         assert remaining == invalid_payload
 
-    def test_decode_auto_timer_checksum_error(self):
+    def test_decode_auto_timer_checksum_error(self) -> None:
         invalid_payload = bytearray(AUTO_TIMER_START_PAYLOAD)
         invalid_payload[-1] = (invalid_payload[-1] + 1) % 256  # Corrupt checksum
         msg, remaining = decode(invalid_payload)
         assert msg is None
         assert remaining == invalid_payload
 
-    def test_decode_unknown_message_type(self):
+    def test_decode_unknown_message_type(self) -> None:
         unknown_payload_no_cs = bytearray(
             [
                 0xFF,
@@ -171,7 +174,7 @@ class TestAioBookooDecode:
         assert msg is None
         assert remaining == unknown_payload
 
-    def test_decode_too_short_message(self):
+    def test_decode_too_short_message(self) -> None:
         short_payload = bytearray([0x03, 0x0B, 0x01])  # Too short to be anything known
         # The decode function no longer raises BookooMessageTooShort for generic short messages
         # It will fall through and return (None, original_message)
@@ -179,7 +182,7 @@ class TestAioBookooDecode:
         assert msg is None
         assert remaining == short_payload
 
-    def test_decode_known_cmd_prefix_unknown_event(self):
+    def test_decode_known_cmd_prefix_unknown_event(self) -> None:
         unknown_event_payload_no_cs = bytearray(
             [
                 CMD_BYTE1_PRODUCT_NUMBER,
