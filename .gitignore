@@ -202,3 +202,5 @@ lerna-debug.log*
 
 # Pip Wheel Metadata
 pip-wheel-metadata/
+
+*.ruff_cache
