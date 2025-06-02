@@ -236,92 +236,76 @@ class BookooScale:
         self, sender: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         """Handle notifications from both weight and command characteristics."""
-        # _LOGGER.debug("Notification from %s: %s", sender.uuid, data.hex()) # Uncomment for verbose debugging
+        # _LOGGER.debug("Notification from %s: %s (raw)", sender.uuid, data.hex())
+
+        decoded_payload, _ = decode(data) # decode returns (BookooMessage|dict|None, remaining_bytes)
+
         if sender.uuid == self._weight_char_id:
-            try:
-                message_tuple = decode(
-                    data
-                )  # decode now returns a tuple (BookooMessage | None, bytearray)
-                if message_tuple and message_tuple[0] is not None:
-                    message: BookooMessage = message_tuple[0]
-                    self._weight = message.weight
-                    self._timer = (
-                        message.timer
-                    )  # timer is already in seconds from BookooMessage
-                    self._flow_rate = message.flow_rate
+            if isinstance(decoded_payload, BookooMessage):
+                msg = decoded_payload
+                self._weight = msg.weight
+                self._timer = msg.timer # Already in seconds
+                self._flow_rate = msg.flow_rate
+                
+                current_unit = UnitMass.GRAMS # Default, as per protocol docs 0x2b is grams
+                if msg.unit == 0x2b: # Explicitly grams
+                    current_unit = UnitMass.GRAMS
+                # Add other unit mappings here if the scale can send other units via this byte
 
-                    # Determine the unit from the raw payload byte, as BookooMessage.unit is raw byte
-                    # and BookooDeviceState.units expects UnitMass enum
-                    current_unit = UnitMass.GRAMS  # Default
-                    if message.unit == 0x2B:  # Assuming 0x2b is the byte for grams
-                        current_unit = UnitMass.GRAMS
-                    elif message.unit == 0x2C:  # Example if 0x2c were ounces
-                        current_unit = UnitMass.OUNCES
-                    # Add other unit mappings if necessary based on protocol
-
+                if self._device_state is None:
                     self._device_state = BookooDeviceState(
-                        battery_level=message.battery,
+                        battery_level=msg.battery,
                         units=current_unit,
-                        buzzer_gear=message.buzzer_gear,
-                        # auto_off_time is not directly in BookooMessage,
-                        # message.standby_time has a different meaning/scale.
-                        # Keep existing auto_off_time or decide on a mapping strategy.
-                        # For now, let's assume auto_off_time is managed separately or not updated here.
-                        auto_off_time=self._device_state.auto_off_time
-                        if self._device_state
-                        else 0,
+                        buzzer_gear=msg.buzzer_gear,
+                        auto_off_time=0 # Initialize, actual auto_off_time is set by command, not from weight notification
                     )
-
-                    if self._characteristic_update_callback:
-                        self._characteristic_update_callback(
-                            UPDATE_SOURCE_WEIGHT_CHAR, bytes(data)
-                        )
-
-                    if self._notify_callback:  # General state change notification
-                        self._notify_callback()
                 else:
-                    _LOGGER.debug(
-                        "Failed to decode weight message or message was None: %s",
-                        data.hex(),
-                    )
+                    self._device_state.battery_level = msg.battery
+                    self._device_state.units = current_unit
+                    self._device_state.buzzer_gear = msg.buzzer_gear
+                
+                # _LOGGER.debug("BookooScale state updated: W:%.2f, T:%.2f, FR:%.2f, Batt:%d, Unit:%s", 
+                #               self._weight or 0, self._timer or 0, self._flow_rate or 0, 
+                #               self._device_state.battery_level, self._device_state.units)
 
-            except BookooMessageError as ex:
-                _LOGGER.debug("Error decoding weight data from %s: %s", sender.uuid, ex)
-            except Exception as ex:
-                _LOGGER.error(
-                    "Unexpected error processing weight notification: %s",
-                    ex,
-                    exc_info=True,
-                )
-
-        elif sender.uuid == self._command_char_id:
-            # Check for 0x0D auto-timer message (payload: 03 0D ...)
-            if (
-                len(data) >= 2
-                and data[0] == CMD_BYTE1_PRODUCT_NUMBER
-                and data[1] == 0x0D
-            ):
-                _LOGGER.debug(
-                    "Received 0x0D auto-timer notification on %s: %s",
-                    sender.uuid,
-                    data.hex(),
-                )
                 if self._characteristic_update_callback:
-                    self._characteristic_update_callback(
-                        UPDATE_SOURCE_COMMAND_CHAR, bytes(data)
-                    )
+                    # Notify coordinator that weight data was processed. Coordinator will read new state from self.scale attributes.
+                    self._characteristic_update_callback(UPDATE_SOURCE_WEIGHT_CHAR, None) # Pass None as data, coordinator reads from self.scale
+                if self._notify_callback: # General state change notification for HA listeners
+                    self._notify_callback()
             else:
                 _LOGGER.debug(
-                    "Received other notification on command char %s: %s",
-                    sender.uuid,
-                    data.hex(),
+                    "Weight char data did not decode to BookooMessage. Got: %s. Raw: %s",
+                    type(decoded_payload).__name__, data.hex()
                 )
+                # Optionally, still notify coordinator with raw data if needed for debugging in HA
+                # if self._characteristic_update_callback:
+                #     self._characteristic_update_callback(UPDATE_SOURCE_WEIGHT_CHAR, bytes(data))
+
+        elif sender.uuid == self._command_char_id:
+            # For command characteristic, we expect a dict (e.g., for auto-timer) or None
+            if self._characteristic_update_callback:
+                if isinstance(decoded_payload, dict):
+                    # Pass the decoded dictionary directly to the coordinator
+                    self._characteristic_update_callback(UPDATE_SOURCE_COMMAND_CHAR, decoded_payload)
+                else:
+                    # If not a dict (e.g. None or other), pass raw data for coordinator to inspect/log
+                    _LOGGER.debug("Command char data did not decode to dict. Got: %s. Raw: %s", 
+                                  type(decoded_payload).__name__ if decoded_payload else 'None', data.hex())
+                    self._characteristic_update_callback(UPDATE_SOURCE_COMMAND_CHAR, bytes(data))
+            if self._notify_callback:
+                 self._notify_callback() # Notify for command char updates too
+        
         else:
             _LOGGER.warning(
                 "Notification from unexpected characteristic %s: %s",
-                sender.uuid,
-                data.hex(),
+                sender.uuid, data.hex()
             )
+            if self._characteristic_update_callback:
+                 # Pass raw data for unknown characteristics
+                self._characteristic_update_callback("unknown_char_update", bytes(data))
+            if self._notify_callback:
+                self._notify_callback()
 
     async def connect(
         self,
