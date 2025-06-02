@@ -6,11 +6,6 @@ updates:
     schedule:
       interval: "daily"
     target-branch: "main" # Or your primary development branch
-    reviewers:
-      - "taliexo" # Your GitHub username
-    labels:
-      - "dependencies"
-      - "python"
     # For aiobookoo, if you want to group dev dependency updates:
     # groups:
     #   dev-dependencies:
@@ -22,8 +17,3 @@ updates:
     schedule:
       interval: "daily"
     target-branch: "main"
-    reviewers:
-      - "taliexo"
-    labels:
-      - "dependencies"
-      - "github_actions"
