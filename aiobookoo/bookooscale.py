@@ -49,13 +49,21 @@ class BookooScale:
     _weight_char_id = CHARACTERISTIC_UUID_WEIGHT
     _command_char_id = CHARACTERISTIC_UUID_COMMAND
 
-    _msg_types = {
-        "tare": bytearray([0x03, 0x0A, 0x01, 0x00, 0x00, 0x08]),
-        "startTimer": bytearray([0x03, 0x0A, 0x04, 0x00, 0x00, 0x0A]),
-        "stopTimer": bytearray([0x03, 0x0A, 0x05, 0x00, 0x00, 0x0D]),
-        "resetTimer": bytearray([0x03, 0x0A, 0x06, 0x00, 0x00, 0x0C]),
-        "tareAndStartTime": bytearray([0x03, 0x0A, 0x07, 0x00, 0x00, 0x00]),
+    # _msg_types now stores payload *without* checksum
+    _base_msg_payloads = {
+        "tare": bytes([0x03, 0x0A, 0x01, 0x00, 0x00]),
+        "startTimer": bytes([0x03, 0x0A, 0x04, 0x00, 0x00]),
+        "stopTimer": bytes([0x03, 0x0A, 0x05, 0x00, 0x00]),
+        "resetTimer": bytes([0x03, 0x0A, 0x06, 0x00, 0x00]),
+        "tareAndStartTime": bytes([0x03, 0x0A, 0x07, 0x00, 0x00]),
     }
+
+    def _calculate_checksum(self, payload_without_checksum: bytes) -> int:
+        """Calculate the XOR checksum for a given payload."""
+        checksum = 0
+        for byte_val in payload_without_checksum:
+            checksum ^= byte_val
+        return checksum
 
     def __init__(
         self,
@@ -98,6 +106,32 @@ class BookooScale:
         self._characteristic_update_callback: Callable[[str, bytes], None] | None = (
             characteristic_update_callback
         )
+
+    async def _add_to_queue(self, char_id: str, payload: bytearray) -> None:
+        """Add a message to the queue to be sent to the device."""
+        if not self._client or not self.connected:
+            _LOGGER.error(
+                "Cannot send command, not connected to %s", self.mac
+            )
+            raise BookooError(f"Not connected to device {self.mac}")
+        async with self._add_to_queue_lock:
+            await self._queue.put((char_id, payload))
+            _LOGGER.debug("Added to queue for %s: %s", char_id, payload.hex())
+
+    async def async_send_command(self, command_name: str) -> None:
+        """Send a command to the scale by name."""
+        if command_name not in self._base_msg_payloads:
+            _LOGGER.error("Unknown command name: %s", command_name)
+            raise BookooError(f"Unknown command: {command_name}")
+        
+        base_payload = self._base_msg_payloads[command_name]
+        checksum = self._calculate_checksum(base_payload)
+        full_payload = bytearray(base_payload)
+        full_payload.append(checksum)
+        
+        _LOGGER.debug("Sending command '%s' with payload %s (base: %s, checksum: %02x)", 
+                      command_name, full_payload.hex(), base_payload.hex(), checksum)
+        await self._add_to_queue(self._command_char_id, full_payload)
 
     @property
     def mac(self) -> str:
