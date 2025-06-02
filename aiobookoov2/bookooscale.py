@@ -20,6 +20,11 @@ from .const import (
     UPDATE_SOURCE_WEIGHT_CHAR,
     UPDATE_SOURCE_COMMAND_CHAR,
     UnitMass,
+    CMD_TARE, # Import new command constants
+    CMD_START_TIMER,
+    CMD_STOP_TIMER,
+    CMD_RESET_TIMER,
+    CMD_TARE_AND_START_TIMER,
 )
 from .exceptions import (
     BookooDeviceNotFound,
@@ -49,14 +54,8 @@ class BookooScale:
     _weight_char_id = CHARACTERISTIC_UUID_WEIGHT
     _command_char_id = CHARACTERISTIC_UUID_COMMAND
 
-    # _msg_types now stores payload *without* checksum
-    _base_msg_payloads = {
-        "tare": bytes([0x03, 0x0A, 0x01, 0x00, 0x00]),
-        "startTimer": bytes([0x03, 0x0A, 0x04, 0x00, 0x00]),
-        "stopTimer": bytes([0x03, 0x0A, 0x05, 0x00, 0x00]),
-        "resetTimer": bytes([0x03, 0x0A, 0x06, 0x00, 0x00]),
-        "tareAndStartTime": bytes([0x03, 0x0A, 0x07, 0x00, 0x00]),
-    }
+    # _command_payloads will store the mapping from command name to its base byte sequence (without checksum)
+    # It will be initialized in __init__ using constants.
 
     def _calculate_checksum(self, payload_without_checksum: bytes) -> int:
         """Calculate the XOR checksum for a given payload."""
@@ -103,9 +102,19 @@ class BookooScale:
         self._last_short_msg: bytearray | None = None
 
         self._notify_callback: Callable[[], None] | None = notify_callback
-        self._characteristic_update_callback: Callable[[str, bytes], None] | None = (
+        self._characteristic_update_callback: Callable[[str, bytes | dict], None] | None = (
             characteristic_update_callback
         )
+
+        # Initialize command payloads using imported constants
+        # These are base payloads; checksum will be calculated in async_send_command
+        self._command_base_payloads = {
+            "tare": CMD_TARE[:-1],  # Exclude checksum byte from const
+            "start_timer": CMD_START_TIMER[:-1],
+            "stop_timer": CMD_STOP_TIMER[:-1],
+            "reset_timer": CMD_RESET_TIMER[:-1],
+            "tare_and_start_timer": CMD_TARE_AND_START_TIMER[:-1],
+        }
 
     async def _add_to_queue(self, char_id: str, payload: bytearray) -> None:
         """Add a message to the queue to be sent to the device."""
@@ -120,14 +129,14 @@ class BookooScale:
 
     async def async_send_command(self, command_name: str) -> None:
         """Send a command to the scale by name."""
-        if command_name not in self._base_msg_payloads:
+        if command_name not in self._command_base_payloads:
             _LOGGER.error("Unknown command name: %s", command_name)
             raise BookooError(f"Unknown command: {command_name}")
         
-        base_payload = self._base_msg_payloads[command_name]
-        checksum = self._calculate_checksum(base_payload)
-        full_payload = bytearray(base_payload)
-        full_payload.append(checksum)
+        base_payload = self._command_base_payloads[command_name]
+        checksum = self._calculate_checksum(base_payload) # Checksum is calculated on the base payload
+        full_payload = bytearray(base_payload) # Create mutable bytearray from base
+        full_payload.append(checksum) # Append the calculated checksum
         
         _LOGGER.debug("Sending command '%s' with payload %s (base: %s, checksum: %02x)", 
                       command_name, full_payload.hex(), base_payload.hex(), checksum)
@@ -431,62 +440,30 @@ class BookooScale:
         try:
             await self._client.disconnect()
         except BleakError as ex:
-            _LOGGER.debug("Error disconnecting from device: %s", ex)
-        else:
-            _LOGGER.debug("Disconnected from scale")
+            _LOGGER.debug("Error during BLE disconnect: %s", ex)
+        # Ensure tasks are cleaned up regardless of disconnect success
+        self.async_empty_queue_and_cancel_tasks()
+        _LOGGER.debug("Finished disconnect procedure for scale")
 
     async def tare(self) -> None:
-        """Tare the scale."""
-        if not self.connected:
-            await self.connect()
-        async with self._add_to_queue_lock:
-            await self._queue.put((self._command_char_id, self._msg_types["tare"]))
+        """Send tare command to the scale."""
+        await self.async_send_command("tare")
 
     async def start_timer(self) -> None:
-        """Start the timer."""
-        if not self.connected:
-            await self.connect()
-
-        _LOGGER.debug('Sending "start" message')
-
-        async with self._add_to_queue_lock:
-            await self._queue.put(
-                (self._command_char_id, self._msg_types["startTimer"])
-            )
+        """Send start timer command to the scale."""
+        await self.async_send_command("start_timer")
 
     async def stop_timer(self) -> None:
-        """Stop the timer."""
-        if not self.connected:
-            await self.connect()
-
-        _LOGGER.debug('Sending "stop" message')
-
-        async with self._add_to_queue_lock:
-            await self._queue.put((self._command_char_id, self._msg_types["stopTimer"]))
-
-    async def tare_and_start_timer(self) -> None:
-        """Tare and Start the timer."""
-        if not self.connected:
-            await self.connect()
-
-        _LOGGER.debug('Sending "tare and start" message')
-
-        async with self._add_to_queue_lock:
-            await self._queue.put(
-                (self._command_char_id, self._msg_types["tareAndStartTime"])
-            )
+        """Send stop timer command to the scale."""
+        await self.async_send_command("stop_timer")
 
     async def reset_timer(self) -> None:
-        """Reset the timer."""
-        if not self.connected:
-            await self.connect()
+        """Send reset timer command to the scale."""
+        await self.async_send_command("reset_timer")
 
-        _LOGGER.debug('Sending "reset" message')
-
-        async with self._add_to_queue_lock:
-            await self._queue.put(
-                (self._command_char_id, self._msg_types["resetTimer"])
-            )
+    async def tare_and_start_timer(self) -> None:
+        """Send tare and start timer command to the scale."""
+        await self.async_send_command("tare_and_start_timer")
 
     async def on_bluetooth_data_received(
         self,

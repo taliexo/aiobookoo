@@ -20,6 +20,14 @@ WEIGHT_BYTE1 = 0x03
 WEIGHT_BYTE2 = 0x0B
 
 
+# Scale Command Payloads
+CMD_TARE: Final[bytes] = b"\x03\x0A\x01\x00\x00\x08"
+CMD_START_TIMER: Final[bytes] = b"\x03\x0A\x04\x00\x00\x0A"
+CMD_STOP_TIMER: Final[bytes] = b"\x03\x0A\x05\x00\x00\x0D"
+CMD_RESET_TIMER: Final[bytes] = b"\x03\x0A\x06\x00\x00\x0C"
+CMD_TARE_AND_START_TIMER: Final[bytes] = b"\x03\x0A\x07\x00\x00\x00"
+# Add other commands like beep, auto-off, flow smoothing if they will be implemented
+
 class UnitMass(StrEnum):
     """Unit of mass."""
 

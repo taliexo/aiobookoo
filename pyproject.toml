@@ -1,6 +1,6 @@
 [project]
 name = "aiobookoov2"
-version = "0.3.1"
+version = "0.3.2"
 license = { text = "MIT" }
 description = "Async Python library for Bookoo BLE scales (v2 fork by taliexo)"
 readme = "README.md"
