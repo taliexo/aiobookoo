@@ -1,9 +1,6 @@
 import asyncio
 
 from aiobookoo import BookooScale
-from aiobookoo.decode import notification_handler
-from aiobookoo.decode import decode, Message
-from aiobookoo.helpers import is_new_scale
 
 
 async def main():

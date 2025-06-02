@@ -27,7 +27,7 @@ class BookooMessage:
             )
             / 1000.0  # time in seconds
         )
-        self.unit: bytes = payload[5]
+        self.unit: int = payload[5]
         self.weight_symbol = -1 if payload[6] == 45 else 1 if payload[6] == 43 else 0
         self.weight: float | None = (
             int.from_bytes(payload[8:10], byteorder="big") / 100.0 * self.weight_symbol

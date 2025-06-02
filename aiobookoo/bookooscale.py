@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 from dataclasses import dataclass
 
@@ -16,6 +16,10 @@ from bleak.exc import BleakDeviceNotFoundError, BleakError
 from .const import (
     CHARACTERISTIC_UUID_WEIGHT,
     CHARACTERISTIC_UUID_COMMAND,
+    CMD_BYTE1_PRODUCT_NUMBER,  # For 0x0D message check
+    UPDATE_SOURCE_WEIGHT_CHAR,
+    UPDATE_SOURCE_COMMAND_CHAR,
+    UnitMass,
 )
 from .exceptions import (
     BookooDeviceNotFound,
@@ -24,7 +28,6 @@ from .exceptions import (
     BookooMessageTooLong,
     BookooMessageTooShort,
 )
-from .const import UnitMass
 from .decode import BookooMessage, decode
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,7 +62,9 @@ class BookooScale:
         address_or_ble_device: str | BLEDevice,
         name: str | None = None,
         is_valid_scale: bool = True,
-        notify_callback: Callable[[], None] | None = None,
+        notify_callback: Callable[[], None] | None = None,  # General state update
+        characteristic_update_callback: Callable[[str, bytes], None]
+        | None = None,  # Detailed char data
     ) -> None:
         """Initialize the scale."""
 
@@ -90,6 +95,9 @@ class BookooScale:
         self._last_short_msg: bytearray | None = None
 
         self._notify_callback: Callable[[], None] | None = notify_callback
+        self._characteristic_update_callback: Callable[[str, bytes], None] | None = (
+            characteristic_update_callback
+        )
 
     @property
     def mac(self) -> str:
@@ -111,7 +119,7 @@ class BookooScale:
         return self._weight
 
     @property
-    def timer(self) -> int:
+    def timer(self) -> float | None:
         """Return the current timer value in seconds."""
         return self._timer
 
@@ -190,15 +198,169 @@ class BookooScale:
                 _LOGGER.debug("Error writing to device: %s", ex)
                 return
 
+    async def _internal_notification_handler(
+        self, sender: BleakGATTCharacteristic, data: bytearray
+    ) -> None:
+        """Handle notifications from both weight and command characteristics."""
+        # _LOGGER.debug("Notification from %s: %s", sender.uuid, data.hex()) # Uncomment for verbose debugging
+        if sender.uuid == self._weight_char_id:
+            try:
+                message_tuple = decode(
+                    data
+                )  # decode now returns a tuple (BookooMessage | None, bytearray)
+                if message_tuple and message_tuple[0] is not None:
+                    message: BookooMessage = message_tuple[0]
+                    self._weight = message.weight
+                    self._timer = (
+                        message.timer
+                    )  # timer is already in seconds from BookooMessage
+                    self._flow_rate = message.flow_rate
+
+                    # Determine the unit from the raw payload byte, as BookooMessage.unit is raw byte
+                    # and BookooDeviceState.units expects UnitMass enum
+                    current_unit = UnitMass.GRAMS  # Default
+                    if message.unit == 0x2B:  # Assuming 0x2b is the byte for grams
+                        current_unit = UnitMass.GRAMS
+                    elif message.unit == 0x2C:  # Example if 0x2c were ounces
+                        current_unit = UnitMass.OUNCES
+                    # Add other unit mappings if necessary based on protocol
+
+                    self._device_state = BookooDeviceState(
+                        battery_level=message.battery,
+                        units=current_unit,
+                        buzzer_gear=message.buzzer_gear,
+                        # auto_off_time is not directly in BookooMessage,
+                        # message.standby_time has a different meaning/scale.
+                        # Keep existing auto_off_time or decide on a mapping strategy.
+                        # For now, let's assume auto_off_time is managed separately or not updated here.
+                        auto_off_time=self._device_state.auto_off_time
+                        if self._device_state
+                        else 0,
+                    )
+
+                    if self._characteristic_update_callback:
+                        self._characteristic_update_callback(
+                            UPDATE_SOURCE_WEIGHT_CHAR, bytes(data)
+                        )
+
+                    if self._notify_callback:  # General state change notification
+                        self._notify_callback()
+                else:
+                    _LOGGER.debug(
+                        "Failed to decode weight message or message was None: %s",
+                        data.hex(),
+                    )
+
+            except BookooMessageError as ex:
+                _LOGGER.debug("Error decoding weight data from %s: %s", sender.uuid, ex)
+            except Exception as ex:
+                _LOGGER.error(
+                    "Unexpected error processing weight notification: %s",
+                    ex,
+                    exc_info=True,
+                )
+
+        elif sender.uuid == self._command_char_id:
+            # Check for 0x0D auto-timer message (payload: 03 0D ...)
+            if (
+                len(data) >= 2
+                and data[0] == CMD_BYTE1_PRODUCT_NUMBER
+                and data[1] == 0x0D
+            ):
+                _LOGGER.debug(
+                    "Received 0x0D auto-timer notification on %s: %s",
+                    sender.uuid,
+                    data.hex(),
+                )
+                if self._characteristic_update_callback:
+                    self._characteristic_update_callback(
+                        UPDATE_SOURCE_COMMAND_CHAR, bytes(data)
+                    )
+            else:
+                _LOGGER.debug(
+                    "Received other notification on command char %s: %s",
+                    sender.uuid,
+                    data.hex(),
+                )
+        else:
+            _LOGGER.warning(
+                "Notification from unexpected characteristic %s: %s",
+                sender.uuid,
+                data.hex(),
+            )
+
     async def connect(
         self,
-        callback: (
-            Callable[[BleakGATTCharacteristic, bytearray], Awaitable[None] | None]
-            | None
-        ) = None,
         setup_tasks: bool = True,
     ) -> None:
         """Connect the bluetooth client."""
+        _LOGGER.debug("Connecting to %s", self.mac)
+        try:
+            if self._client and self._client.is_connected:
+                _LOGGER.debug("Already connected to %s", self.mac)
+                return
+
+            self._client = BleakClient(
+                self.address_or_ble_device,
+                disconnected_callback=self.device_disconnected_handler,
+            )
+            await self._client.connect()
+            self.connected = self._client.is_connected
+            _LOGGER.debug("Connected to %s: %s", self.mac, self.connected)
+
+            if not self.connected:
+                raise BookooDeviceNotFound(f"Failed to connect to {self.mac}")
+
+            # Subscribe to notifications
+            await self._client.start_notify(
+                self._weight_char_id, self._internal_notification_handler
+            )
+            _LOGGER.debug(
+                "Subscribed to weight characteristic (%s) notifications.",
+                self._weight_char_id,
+            )
+
+            try:
+                await self._client.start_notify(
+                    self._command_char_id, self._internal_notification_handler
+                )
+                _LOGGER.debug(
+                    "Subscribed to command characteristic (%s) notifications.",
+                    self._command_char_id,
+                )
+            except Exception as e:
+                _LOGGER.warning(
+                    "Could not subscribe to command characteristic (%s) notifications: %s. "
+                    "Auto-timer events from scale will not be detected.",
+                    self._command_char_id,
+                    e,
+                )
+
+            if setup_tasks:
+                if self.process_queue_task and not self.process_queue_task.done():
+                    self.process_queue_task.cancel()
+                self.process_queue_task = asyncio.create_task(self.process_queue())
+                _LOGGER.debug("Queue processing task started for %s", self.mac)
+
+            if self._notify_callback:
+                self._notify_callback()
+
+        except BleakDeviceNotFoundError as ex:
+            self.connected = False
+            self.last_disconnect_time = time.time()
+            raise BookooDeviceNotFound(f"Device {self.mac} not found") from ex
+        except BleakError as ex:
+            self.connected = False
+            self.last_disconnect_time = time.time()
+            _LOGGER.error("BleakError while connecting to %s: %s", self.mac, ex)
+            raise BookooError(f"Error connecting to {self.mac}") from ex
+        except Exception as ex:
+            self.connected = False
+            self.last_disconnect_time = time.time()
+            _LOGGER.error(
+                "Unexpected error connecting to %s: %s", self.mac, ex, exc_info=True
+            )
+            raise BookooError(f"Unexpected error connecting to {self.mac}") from ex
 
         if self.connected:
             return
@@ -231,21 +393,6 @@ class BookooScale:
 
         self.connected = True
         _LOGGER.debug("Connected to Bookoo scale")
-
-        if callback is None:
-            callback = self.on_bluetooth_data_received
-        try:
-            await self._client.start_notify(
-                char_specifier=self._weight_char_id,
-                callback=(
-                    self.on_bluetooth_data_received if callback is None else callback
-                ),
-            )
-            await asyncio.sleep(0.1)
-        except BleakError as ex:
-            msg = "Error subscribing to notifications"
-            _LOGGER.debug("%s: %s", msg, ex)
-            raise BookooError(msg) from ex
 
         if setup_tasks:
             self._setup_tasks()
