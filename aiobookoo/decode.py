@@ -3,7 +3,14 @@
 from dataclasses import dataclass
 import logging
 
-from .const import WEIGHT_BYTE1, WEIGHT_BYTE2
+from .const import (
+    WEIGHT_BYTE1, 
+    WEIGHT_BYTE2, 
+    CMD_BYTE1_PRODUCT_NUMBER, 
+    CMD_BYTE2_MESSAGE_TYPE_AUTO_TIMER, 
+    CMD_BYTE3_AUTO_TIMER_EVENT_START, 
+    CMD_BYTE3_AUTO_TIMER_EVENT_STOP
+)
 from .exceptions import BookooMessageError, BookooMessageTooLong, BookooMessageTooShort
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,22 +69,56 @@ class BookooMessage:
         # )
 
 
-def decode(byte_msg: bytearray):
+def decode(byte_msg: bytearray) -> tuple[BookooMessage | dict | None, bytearray]:
     """Return a tuple - first element is the message, or None.
 
     The second element is the remaining bytes of the message.
 
     """
 
-    if len(byte_msg) < 20:
-        raise BookooMessageTooShort(byte_msg)
+    # Check for Weight Characteristic Message (typically 20 bytes)
+    if len(byte_msg) == 20 and byte_msg[0] == WEIGHT_BYTE1 and byte_msg[1] == WEIGHT_BYTE2:
+        # Perform checksum for weight message before parsing
+        checksum = 0
+        for byte_val in byte_msg[:-1]:
+            checksum ^= byte_val
+        if checksum != byte_msg[-1]:
+            _LOGGER.warning("Weight message checksum mismatch: %s", byte_msg.hex())
+            # Decide if to raise BookooMessageError or return None
+            # For now, let's be strict, as BookooMessage init will also check
+            # raise BookooMessageError(byte_msg, "Checksum mismatch in decode function for weight")
+            # Or, let BookooMessage handle it, but then we might pass bad data to it.
+            # Let's return None for now if checksum fails here, to avoid BookooMessage init error.
+            return (None, byte_msg) # Or raise error
+        _LOGGER.debug("Found valid weight Message")
+        return (BookooMessage(byte_msg), bytearray()) # BookooMessage also does checksum
 
-    if len(byte_msg) > 20:
-        raise BookooMessageTooLong(byte_msg)
+    # Check for Command Characteristic Auto-Timer Messages (typically 20 bytes)
+    # Assuming CMD_PRODUCT_NUMBER, CMD_TYPE_AUTO_TIMER, etc. are imported from .const
+    # For example: from .const import CMD_PRODUCT_NUMBER, CMD_TYPE_AUTO_TIMER, CMD_EVENT_AUTO_TIMER_START, CMD_EVENT_AUTO_TIMER_STOP
+    # These constants would be: 0x03, 0x0D, 0x01, 0x00 respectively.
+    # Also assuming auto-timer messages are a fixed length, e.g., 20 bytes including checksum.
+    # A more robust implementation would check message type first, then length for that type.
+    if len(byte_msg) == 20 and byte_msg[0] == CMD_BYTE1_PRODUCT_NUMBER and byte_msg[1] == CMD_BYTE2_MESSAGE_TYPE_AUTO_TIMER:
+        # Perform checksum for auto-timer message
+        checksum = 0
+        for byte_val in byte_msg[:-1]:
+            checksum ^= byte_val
+        if checksum != byte_msg[-1]:
+            _LOGGER.warning("Auto-timer command message checksum mismatch: %s", byte_msg.hex())
+            return (None, byte_msg) # Or raise error
 
-    if byte_msg[0] == WEIGHT_BYTE1 and byte_msg[1] == WEIGHT_BYTE2:
-        # _LOGGER.debug("Found valid weight Message")
-        return (BookooMessage(byte_msg), bytearray())
+        if byte_msg[2] == CMD_BYTE3_AUTO_TIMER_EVENT_START: # Auto-timer Start event
+            _LOGGER.debug("Found auto-timer start command message")
+            return ({'type': 'auto_timer', 'event': 'start'}, bytearray())
+        elif byte_msg[2] == CMD_BYTE3_AUTO_TIMER_EVENT_STOP: # Auto-timer Stop event
+            _LOGGER.debug("Found auto-timer stop command message")
+            return ({'type': 'auto_timer', 'event': 'stop'}, bytearray())
+        else:
+            _LOGGER.debug("Known command prefix (0x030D) but unknown event: %s", byte_msg.hex())
+    
+    # Add checks for other command characteristic messages here if needed
+
 
     _LOGGER.debug("Full message: %s", byte_msg)
     return (None, byte_msg)
