@@ -16,11 +16,10 @@ from bleak.exc import BleakDeviceNotFoundError, BleakError
 from .const import (
     CHARACTERISTIC_UUID_WEIGHT,
     CHARACTERISTIC_UUID_COMMAND,
-    CMD_BYTE1_PRODUCT_NUMBER,  # For 0x0D message check
     UPDATE_SOURCE_WEIGHT_CHAR,
     UPDATE_SOURCE_COMMAND_CHAR,
     UnitMass,
-    CMD_TARE, # Import new command constants
+    CMD_TARE,  # Import new command constants
     CMD_START_TIMER,
     CMD_STOP_TIMER,
     CMD_RESET_TIMER,
@@ -70,7 +69,7 @@ class BookooScale:
         name: str | None = None,
         is_valid_scale: bool = True,
         notify_callback: Callable[[], None] | None = None,  # General state update
-        characteristic_update_callback: Callable[[str, bytes], None]
+        characteristic_update_callback: Callable[[str, bytes | dict | None], None]
         | None = None,  # Detailed char data
     ) -> None:
         """Initialize the scale."""
@@ -102,9 +101,9 @@ class BookooScale:
         self._last_short_msg: bytearray | None = None
 
         self._notify_callback: Callable[[], None] | None = notify_callback
-        self._characteristic_update_callback: Callable[[str, bytes | dict], None] | None = (
-            characteristic_update_callback
-        )
+        self._characteristic_update_callback: (
+            Callable[[str, bytes | dict | None], None] | None
+        ) = characteristic_update_callback
 
         # Initialize command payloads using imported constants
         # These are base payloads; checksum will be calculated in async_send_command
@@ -119,9 +118,7 @@ class BookooScale:
     async def _add_to_queue(self, char_id: str, payload: bytearray) -> None:
         """Add a message to the queue to be sent to the device."""
         if not self._client or not self.connected:
-            _LOGGER.error(
-                "Cannot send command, not connected to %s", self.mac
-            )
+            _LOGGER.error("Cannot send command, not connected to %s", self.mac)
             raise BookooError(f"Not connected to device {self.mac}")
         async with self._add_to_queue_lock:
             await self._queue.put((char_id, payload))
@@ -132,14 +129,21 @@ class BookooScale:
         if command_name not in self._command_base_payloads:
             _LOGGER.error("Unknown command name: %s", command_name)
             raise BookooError(f"Unknown command: {command_name}")
-        
+
         base_payload = self._command_base_payloads[command_name]
-        checksum = self._calculate_checksum(base_payload) # Checksum is calculated on the base payload
-        full_payload = bytearray(base_payload) # Create mutable bytearray from base
-        full_payload.append(checksum) # Append the calculated checksum
-        
-        _LOGGER.debug("Sending command '%s' with payload %s (base: %s, checksum: %02x)", 
-                      command_name, full_payload.hex(), base_payload.hex(), checksum)
+        checksum = self._calculate_checksum(
+            base_payload
+        )  # Checksum is calculated on the base payload
+        full_payload = bytearray(base_payload)  # Create mutable bytearray from base
+        full_payload.append(checksum)  # Append the calculated checksum
+
+        _LOGGER.debug(
+            "Sending command '%s' with payload %s (base: %s, checksum: %02x)",
+            command_name,
+            full_payload.hex(),
+            base_payload.hex(),
+            checksum,
+        )
         await self._add_to_queue(self._command_char_id, full_payload)
 
     @property
@@ -247,17 +251,21 @@ class BookooScale:
         """Handle notifications from both weight and command characteristics."""
         # _LOGGER.debug("Notification from %s: %s (raw)", sender.uuid, data.hex())
 
-        decoded_payload, _ = decode(data) # decode returns (BookooMessage|dict|None, remaining_bytes)
+        decoded_payload, _ = decode(
+            data
+        )  # decode returns (BookooMessage|dict|None, remaining_bytes)
 
         if sender.uuid == self._weight_char_id:
             if isinstance(decoded_payload, BookooMessage):
                 msg = decoded_payload
                 self._weight = msg.weight
-                self._timer = msg.timer # Already in seconds
+                self._timer = msg.timer  # Already in seconds
                 self._flow_rate = msg.flow_rate
-                
-                current_unit = UnitMass.GRAMS # Default, as per protocol docs 0x2b is grams
-                if msg.unit == 0x2b: # Explicitly grams
+
+                current_unit = (
+                    UnitMass.GRAMS
+                )  # Default, as per protocol docs 0x2b is grams
+                if msg.unit == 0x2B:  # Explicitly grams
                     current_unit = UnitMass.GRAMS
                 # Add other unit mappings here if the scale can send other units via this byte
 
@@ -266,26 +274,31 @@ class BookooScale:
                         battery_level=msg.battery,
                         units=current_unit,
                         buzzer_gear=msg.buzzer_gear,
-                        auto_off_time=0 # Initialize, actual auto_off_time is set by command, not from weight notification
+                        auto_off_time=0,  # Initialize, actual auto_off_time is set by command, not from weight notification
                     )
                 else:
                     self._device_state.battery_level = msg.battery
                     self._device_state.units = current_unit
                     self._device_state.buzzer_gear = msg.buzzer_gear
-                
-                # _LOGGER.debug("BookooScale state updated: W:%.2f, T:%.2f, FR:%.2f, Batt:%d, Unit:%s", 
-                #               self._weight or 0, self._timer or 0, self._flow_rate or 0, 
+
+                # _LOGGER.debug("BookooScale state updated: W:%.2f, T:%.2f, FR:%.2f, Batt:%d, Unit:%s",
+                #               self._weight or 0, self._timer or 0, self._flow_rate or 0,
                 #               self._device_state.battery_level, self._device_state.units)
 
                 if self._characteristic_update_callback:
                     # Notify coordinator that weight data was processed. Coordinator will read new state from self.scale attributes.
-                    self._characteristic_update_callback(UPDATE_SOURCE_WEIGHT_CHAR, None) # Pass None as data, coordinator reads from self.scale
-                if self._notify_callback: # General state change notification for HA listeners
+                    self._characteristic_update_callback(
+                        UPDATE_SOURCE_WEIGHT_CHAR, None
+                    )  # Pass None as data, coordinator reads from self.scale
+                if (
+                    self._notify_callback
+                ):  # General state change notification for HA listeners
                     self._notify_callback()
             else:
                 _LOGGER.debug(
                     "Weight char data did not decode to BookooMessage. Got: %s. Raw: %s",
-                    type(decoded_payload).__name__, data.hex()
+                    type(decoded_payload).__name__,
+                    data.hex(),
                 )
                 # Optionally, still notify coordinator with raw data if needed for debugging in HA
                 # if self._characteristic_update_callback:
@@ -296,22 +309,30 @@ class BookooScale:
             if self._characteristic_update_callback:
                 if isinstance(decoded_payload, dict):
                     # Pass the decoded dictionary directly to the coordinator
-                    self._characteristic_update_callback(UPDATE_SOURCE_COMMAND_CHAR, decoded_payload)
+                    self._characteristic_update_callback(
+                        UPDATE_SOURCE_COMMAND_CHAR, decoded_payload
+                    )
                 else:
                     # If not a dict (e.g. None or other), pass raw data for coordinator to inspect/log
-                    _LOGGER.debug("Command char data did not decode to dict. Got: %s. Raw: %s", 
-                                  type(decoded_payload).__name__ if decoded_payload else 'None', data.hex())
-                    self._characteristic_update_callback(UPDATE_SOURCE_COMMAND_CHAR, bytes(data))
+                    _LOGGER.debug(
+                        "Command char data did not decode to dict. Got: %s. Raw: %s",
+                        type(decoded_payload).__name__ if decoded_payload else "None",
+                        data.hex(),
+                    )
+                    self._characteristic_update_callback(
+                        UPDATE_SOURCE_COMMAND_CHAR, bytes(data)
+                    )
             if self._notify_callback:
-                 self._notify_callback() # Notify for command char updates too
-        
+                self._notify_callback()  # Notify for command char updates too
+
         else:
             _LOGGER.warning(
                 "Notification from unexpected characteristic %s: %s",
-                sender.uuid, data.hex()
+                sender.uuid,
+                data.hex(),
             )
             if self._characteristic_update_callback:
-                 # Pass raw data for unknown characteristics
+                # Pass raw data for unknown characteristics
                 self._characteristic_update_callback("unknown_char_update", bytes(data))
             if self._notify_callback:
                 self._notify_callback()
