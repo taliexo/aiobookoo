@@ -40,7 +40,6 @@ VALID_WEIGHT_PAYLOAD_NO_CS = bytearray([
     0xAA        # Placeholder for checksum (20th byte, Index 19) - value doesn't matter here
 ])
 calculated_weight_cs = calculate_checksum(VALID_WEIGHT_PAYLOAD_NO_CS[:-1])
-print(f"Test calculated weight CS: 0x{calculated_weight_cs:02X}")
 VALID_WEIGHT_PAYLOAD = VALID_WEIGHT_PAYLOAD_NO_CS[:-1] + bytes([calculated_weight_cs])
 
 AUTO_TIMER_START_PAYLOAD_NO_CS = bytearray([
