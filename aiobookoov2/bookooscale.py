@@ -190,7 +190,23 @@ class BookooScale:
 
         self.connected = False
         self.last_disconnect_time = time.time()
-        self.async_empty_queue_and_cancel_tasks()
+        # Schedule the async cleanup task as this handler is synchronous
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.async_empty_queue_and_cancel_tasks())
+            _LOGGER.debug(
+                "Scheduled async_empty_queue_and_cancel_tasks from device_disconnected_handler for %s",
+                self.mac,
+            )
+        except RuntimeError:
+            _LOGGER.warning(
+                "No running event loop in device_disconnected_handler for %s to schedule task cleanup.",
+                self.mac,
+            )
+            # Fallback: synchronous cancel, though task completion isn't guaranteed to be awaited.
+            if self.process_queue_task and not self.process_queue_task.done():
+                self.process_queue_task.cancel()
+
         if notify and self._notify_callback:
             self._notify_callback()
 
@@ -214,36 +230,90 @@ class BookooScale:
             self.connected = False
             raise BookooError("Unknown error writing to device") from ex
 
-    def async_empty_queue_and_cancel_tasks(self) -> None:
-        """Empty the queue."""
+    async def async_empty_queue_and_cancel_tasks(self) -> None:
+        """Empty the queue and ensure the processing task is cancelled and awaited."""
 
         while not self._queue.empty():
             self._queue.get_nowait()
             self._queue.task_done()
 
-        if self.process_queue_task and not self.process_queue_task.done():
-            self.process_queue_task.cancel()
+        task_to_await = self.process_queue_task
+        if task_to_await and not task_to_await.done():
+            _LOGGER.debug("Cancelling process_queue_task for %s", self.mac)
+            task_to_await.cancel()
+            try:
+                _LOGGER.debug("Awaiting cancelled process_queue_task for %s", self.mac)
+                await task_to_await
+                _LOGGER.debug("Cancelled process_queue_task for %s finished.", self.mac)
+            except asyncio.CancelledError:
+                _LOGGER.debug(
+                    "process_queue_task for %s was cancelled as expected.", self.mac
+                )
+            except Exception as e:
+                _LOGGER.error(
+                    "Exception while awaiting cancelled process_queue_task for %s: %s",
+                    self.mac,
+                    e,
+                    exc_info=True,
+                )
+        self.process_queue_task = None  # Clear the reference
 
     async def process_queue(self) -> None:
         """Task to process the queue in the background."""
-        while True:
-            try:
+        try:
+            while True:
                 if not self.connected:
-                    self.async_empty_queue_and_cancel_tasks()
+                    _LOGGER.debug(
+                        "process_queue for %s: not connected, initiating cleanup.",
+                        self.mac,
+                    )
+                    await self.async_empty_queue_and_cancel_tasks()
                     return
 
                 char_id, payload = await self._queue.get()
+                _LOGGER.debug(
+                    "process_queue for %s: got item, writing %s to %s",
+                    self.mac,
+                    payload.hex(),
+                    char_id,
+                )
                 await self._write_msg(char_id, payload)
                 self._queue.task_done()
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(
+                    0.1
+                )  # Small delay to prevent busy-looping on rapid queue additions
 
-            except asyncio.CancelledError:
-                self.connected = False
-                return
-            except (BookooDeviceNotFound, BookooError) as ex:
-                self.connected = False
-                _LOGGER.debug("Error writing to device: %s", ex)
-                return
+        except asyncio.CancelledError:
+            _LOGGER.debug(
+                "process_queue for %s received CancelledError. Cleaning up.", self.mac
+            )
+            # This task is being cancelled. The entity that cancelled it
+            # (e.g. async_empty_queue_and_cancel_tasks) should await its completion.
+            # Setting self.connected = False is important.
+            self.connected = False
+            # Do not call async_empty_queue_and_cancel_tasks from here if this task is being cancelled by it,
+            # to avoid potential recursion if the await in that method re-enters here somehow before this task fully exits.
+            # The primary canceller should handle the await.
+            raise  # Re-raise CancelledError so awaiter knows task is cancelled
+        except (BookooDeviceNotFound, BookooError) as ex:
+            _LOGGER.debug(
+                "process_queue for %s: connection error: %s. Cleaning up.", self.mac, ex
+            )
+            await self.async_empty_queue_and_cancel_tasks()
+            self.connected = False
+            # Do not re-raise, allow task to exit gracefully after error
+        except Exception as ex:
+            _LOGGER.error(
+                "process_queue for %s: unexpected error: %s. Cleaning up.",
+                self.mac,
+                ex,
+                exc_info=True,
+            )
+            await self.async_empty_queue_and_cancel_tasks()
+            self.connected = False
+            # Do not re-raise, allow task to exit gracefully after error
+        finally:
+            _LOGGER.debug("process_queue for %s is exiting.", self.mac)
 
     async def _internal_notification_handler(
         self, sender: BleakGATTCharacteristic, data: bytearray
@@ -463,7 +533,9 @@ class BookooScale:
         except BleakError as ex:
             _LOGGER.debug("Error during BLE disconnect: %s", ex)
         # Ensure tasks are cleaned up regardless of disconnect success
-        self.async_empty_queue_and_cancel_tasks()
+        await (
+            self.async_empty_queue_and_cancel_tasks()
+        )  # Now awaiting the async version
         _LOGGER.debug("Finished disconnect procedure for scale")
 
     async def tare(self) -> None:
