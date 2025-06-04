@@ -191,24 +191,62 @@ class BookooScale:
         self.connected = False
         self.last_disconnect_time = time.time()
         # Schedule the async cleanup task as this handler is synchronous
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self.async_empty_queue_and_cancel_tasks())
+        # If the task is already being handled or is done, maybe don't reschedule.
+        if self.process_queue_task and not self.process_queue_task.done():
+            try:
+                loop = asyncio.get_running_loop()
+                if not loop.is_closed():  # Check if loop is not already closing
+                    # Schedule the cleanup, but don't necessarily wait for it here
+                    # as this handler is a callback.
+                    _LOGGER.debug(
+                        "Scheduling async_empty_queue_and_cancel_tasks via loop.create_task for %s",
+                        self.mac,
+                    )
+                    loop.create_task(self.async_empty_queue_and_cancel_tasks())
+                else:
+                    _LOGGER.warning(
+                        "Event loop closed in device_disconnected_handler for %s, synchronous cancel attempt for process_queue_task.",
+                        self.mac,
+                    )
+                    if (
+                        self.process_queue_task and not self.process_queue_task.done()
+                    ):  # Check again before cancelling
+                        self.process_queue_task.cancel()
+            except RuntimeError:  # Loop not running
+                _LOGGER.warning(
+                    "No running event loop in device_disconnected_handler for %s. Synchronous cancel attempt for process_queue_task.",
+                    self.mac,
+                )
+                if (
+                    self.process_queue_task and not self.process_queue_task.done()
+                ):  # Check again before cancelling
+                    self.process_queue_task.cancel()
+        elif self.process_queue_task and self.process_queue_task.done():
             _LOGGER.debug(
-                "Scheduled async_empty_queue_and_cancel_tasks from device_disconnected_handler for %s",
+                "process_queue_task for %s already done in device_disconnected_handler.",
                 self.mac,
             )
-        except RuntimeError:
-            _LOGGER.warning(
-                "No running event loop in device_disconnected_handler for %s to schedule task cleanup.",
+        else:
+            _LOGGER.debug(
+                "No process_queue_task or task already None in device_disconnected_handler for %s.",
                 self.mac,
             )
-            # Fallback: synchronous cancel, though task completion isn't guaranteed to be awaited.
-            if self.process_queue_task and not self.process_queue_task.done():
-                self.process_queue_task.cancel()
 
         if notify and self._notify_callback:
-            self._notify_callback()
+            try:
+                loop = asyncio.get_running_loop()
+                if not loop.is_closed():
+                    self._notify_callback()
+                else:
+                    _LOGGER.debug(
+                        "Event loop closed, skipping _notify_callback in device_disconnected_handler for %s",
+                        self.mac,
+                    )
+            except RuntimeError:
+                _LOGGER.debug(
+                    "No running event loop, skipping _notify_callback in device_disconnected_handler for %s",
+                    self.mac,
+                )
 
     async def _write_msg(self, char_id: str, payload: bytearray) -> None:
         """Write to the device."""
