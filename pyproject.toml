@@ -1,7 +1,7 @@
 [project]
 name = "aiobookoov2"
 version = "0.3.4"
-license = { text = "MIT" }
+license = "MIT"  # SPDX identifier for MIT License
 description = "Async Python library for Bookoo BLE scales (v2 fork by taliexo)"
 readme = "README.md"
 authors = [
@@ -16,7 +16,6 @@ classifiers = [
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
     "Natural Language :: English",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.12",
 ]
