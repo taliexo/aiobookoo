@@ -1,6 +1,6 @@
 [project]
 name = "aiobookoov2"
-version = "0.3.5"
+version = "0.3.6"
 license = "MIT"  # SPDX identifier for MIT License
 description = "Async Python library for Bookoo BLE scales (v2 fork by taliexo)"
 readme = "README.md"
