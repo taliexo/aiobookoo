@@ -68,6 +68,10 @@ class BookooScale:
         address_or_ble_device: str | BLEDevice,
         name: str | None = None,
         is_valid_scale: bool = True,
+        max_queue_size: int = 100,  # Max items in command queue
+        queue_process_delay: float = 0.1,  # Delay between queue item processing
+        max_connect_attempts: int = 3,  # Max attempts for initial connection
+        initial_retry_delay: float = 1.0,  # Initial delay for connection retry in seconds
         notify_callback: Callable[[], None] | None = None,  # General state update
         characteristic_update_callback: Callable[[str, bytes | dict | None], None]
         | None = None,  # Detailed char data
@@ -80,6 +84,9 @@ class BookooScale:
         self.address_or_ble_device = address_or_ble_device
         self.model = "Themis"
         self.name = name
+        self._queue_process_delay = queue_process_delay
+        self._max_connect_attempts = max_connect_attempts
+        self._initial_retry_delay = initial_retry_delay
 
         # tasks
         self.process_queue_task: asyncio.Task | None = None
@@ -95,7 +102,7 @@ class BookooScale:
         self._flow_rate: float | None = None
 
         # queue
-        self._queue: asyncio.Queue = asyncio.Queue()
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue_size)
         self._add_to_queue_lock = asyncio.Lock()
 
         self._last_short_msg: bytearray | None = None
@@ -190,83 +197,39 @@ class BookooScale:
 
         self.connected = False
         self.last_disconnect_time = time.time()
-        # Schedule the async cleanup task as this handler is synchronous
-        # If the task is already being handled or is done, maybe don't reschedule.
-        if self.process_queue_task and not self.process_queue_task.done():
-            try:
-                loop = asyncio.get_running_loop()
-                if not loop.is_closed():  # Check if loop is not already closing
-                    # Schedule the cleanup, but don't necessarily wait for it here
-                    # as this handler is a callback.
-                    _LOGGER.debug(
-                        "Scheduling async_empty_queue_and_cancel_tasks via loop.create_task for %s",
-                        self.mac,
-                    )
-                    loop.create_task(self.async_empty_queue_and_cancel_tasks())
-                else:
-                    _LOGGER.warning(
-                        "Event loop closed in device_disconnected_handler for %s, synchronous cancel attempt for process_queue_task.",
-                        self.mac,
-                    )
-                    if (
-                        self.process_queue_task and not self.process_queue_task.done()
-                    ):  # Check again before cancelling
-                        self.process_queue_task.cancel()
-            except RuntimeError:  # Loop not running
+
+        # Schedule the asynchronous task to empty queue and cancel processing tasks.
+        # This is preferred over complex synchronous logic in a callback.
+        try:
+            # The async_empty_queue_and_cancel_tasks will handle clearing the queue
+            # and cancelling the process_queue_task.
+            asyncio.create_task(self.async_empty_queue_and_cancel_tasks())
+            _LOGGER.debug(
+                "Scheduled async_empty_queue_and_cancel_tasks for %s.", self.mac
+            )
+        except RuntimeError as e:
+            _LOGGER.error(
+                "Failed to schedule async_empty_queue_and_cancel_tasks for %s due to RuntimeError: %s. "
+                "Queue might not be emptied and task might not be cancelled if event loop is not running.",
+                self.mac,
+                e,
+            )
+            # Fallback: If create_task fails (e.g. loop not running), attempt direct cancellation.
+            # This is a best-effort and might have issues if the task is in an uninterruptible await.
+            if self.process_queue_task and not self.process_queue_task.done():
                 _LOGGER.warning(
-                    "No running event loop in device_disconnected_handler for %s. Synchronous cancel attempt for process_queue_task.",
+                    "Attempting direct cancellation of process_queue_task for %s as a fallback.",
                     self.mac,
                 )
-                if (
-                    self.process_queue_task and not self.process_queue_task.done()
-                ):  # Check again before cancelling
-                    self.process_queue_task.cancel()
-        elif self.process_queue_task and self.process_queue_task.done():
-            _LOGGER.debug(
-                "process_queue_task for %s already done in device_disconnected_handler.",
-                self.mac,
-            )
-        else:
-            _LOGGER.debug(
-                "No process_queue_task or task already None in device_disconnected_handler for %s.",
-                self.mac,
-            )
+                self.process_queue_task.cancel()
 
         if notify and self._notify_callback:
-            try:
-                loop = asyncio.get_running_loop()
-                if not loop.is_closed():
-                    self._notify_callback()
-                else:
-                    _LOGGER.debug(
-                        "Event loop closed, skipping _notify_callback in device_disconnected_handler for %s",
-                        self.mac,
-                    )
-            except RuntimeError:
-                _LOGGER.debug(
-                    "No running event loop, skipping _notify_callback in device_disconnected_handler for %s",
-                    self.mac,
-                )
+            self._notify_callback()
 
-    async def _write_msg(self, char_id: str, payload: bytearray) -> None:
-        """Write to the device."""
-        if self._client is None:
-            raise BookooError("Client not initialized")
-        try:
-            await self._client.write_gatt_char(char_id, payload)
-            self._timestamp_last_command = time.time()
-        except BleakDeviceNotFoundError as ex:
-            self.connected = False
-            raise BookooDeviceNotFound("Device not found") from ex
-        except BleakError as ex:
-            self.connected = False
-            raise BookooError("Error writing to device") from ex
-        except TimeoutError as ex:
-            self.connected = False
-            raise BookooError("Timeout writing to device") from ex
-        except Exception as ex:
-            self.connected = False
-            raise BookooError("Unknown error writing to device") from ex
+        # Reset client. This should be done after attempting to cancel tasks
+        # that might use the client, though Bleak typically handles this.
+        self._client = None
+        _LOGGER.info("Scale %s disconnected.", self.mac)
 
     async def async_empty_queue_and_cancel_tasks(self) -> None:
         """Empty the queue and ensure the processing task is cancelled and awaited."""
@@ -294,7 +257,7 @@ class BookooScale:
                     e,
                     exc_info=True,
                 )
-        self.process_queue_task = None  # Clear the reference
+        self.process_queue_task = None  # Ensure task is cleared after handling
 
     async def process_queue(self) -> None:
         """Task to process the queue in the background."""
@@ -315,10 +278,24 @@ class BookooScale:
                     payload.hex(),
                     char_id,
                 )
-                await self._write_msg(char_id, payload)
+                if not self._client:
+                    _LOGGER.error(
+                        "process_queue for %s: No BleakClient available to write payload %s to %s.",
+                        self.mac,
+                        payload.hex(),
+                        char_id,
+                    )
+                    # Handle as a connection error, trigger cleanup
+                    raise BookooError(f"BLE client not available for device {self.mac}")
+
+                await self._client.write_gatt_char(
+                    char_id, payload, response=True
+                )  # Assuming response=True is desired
+                self._timestamp_last_command = time.time()
+                _LOGGER.debug("Successfully wrote to %s: %s", char_id, payload.hex())
                 self._queue.task_done()
                 await asyncio.sleep(
-                    0.1
+                    self._queue_process_delay
                 )  # Small delay to prevent busy-looping on rapid queue additions
 
         except asyncio.CancelledError:
@@ -333,17 +310,28 @@ class BookooScale:
             # to avoid potential recursion if the await in that method re-enters here somehow before this task fully exits.
             # The primary canceller should handle the await.
             raise  # Re-raise CancelledError so awaiter knows task is cancelled
-        except (BookooDeviceNotFound, BookooError) as ex:
-            _LOGGER.debug(
-                "process_queue for %s: connection error: %s. Cleaning up.", self.mac, ex
+        except (
+            BookooDeviceNotFound,
+            BookooError,
+            BleakError,
+            asyncio.TimeoutError,
+        ) as ex:  # Consolidate BLE/Connection errors
+            # Try to get char_id and payload if available in this scope, otherwise log general error
+            # For now, we'll assume they are not reliably available here if the error happened outside the get/write sequence.
+            _LOGGER.warning(
+                "process_queue for %s: BLE/connection error: %s (%s). Cleaning up.",
+                self.mac,
+                type(ex).__name__,
+                ex,
             )
             await self.async_empty_queue_and_cancel_tasks()
             self.connected = False
             # Do not re-raise, allow task to exit gracefully after error
-        except Exception as ex:
+        except Exception as ex:  # Catch-all for other unexpected errors
             _LOGGER.error(
-                "process_queue for %s: unexpected error: %s. Cleaning up.",
+                "process_queue for %s: Unexpected error: %s (%s). Cleaning up.",
                 self.mac,
+                type(ex).__name__,
                 ex,
                 exc_info=True,
             )
@@ -418,7 +406,8 @@ class BookooScale:
                 if isinstance(decoded_payload, dict):
                     # Pass the decoded dictionary directly to the coordinator
                     self._characteristic_update_callback(
-                        UPDATE_SOURCE_COMMAND_CHAR, decoded_payload
+                        UPDATE_SOURCE_COMMAND_CHAR,
+                        dict(decoded_payload),  # Cast TypedDict to dict
                     )
                 else:
                     # If not a dict (e.g. None or other), pass raw data for coordinator to inspect/log
@@ -449,74 +438,140 @@ class BookooScale:
         self,
         setup_tasks: bool = True,
     ) -> None:
-        """Connect the bluetooth client."""
-        _LOGGER.debug("Connecting to %s", self.mac)
-        try:
-            if self._client and self._client.is_connected:
-                _LOGGER.debug("Already connected to %s", self.mac)
-                return
+        """Connect the bluetooth client with retry logic."""
+        last_exception: Exception | None = None
 
-            self._client = BleakClient(
-                self.address_or_ble_device,
-                disconnected_callback=self.device_disconnected_handler,
-            )
-            await self._client.connect()
-            self.connected = self._client.is_connected
-            _LOGGER.debug("Connected to %s: %s", self.mac, self.connected)
-
-            if not self.connected:
-                raise BookooDeviceNotFound(f"Failed to connect to {self.mac}")
-
-            # Subscribe to notifications
-            await self._client.start_notify(
-                self._weight_char_id, self._internal_notification_handler
-            )
+        for attempt in range(self._max_connect_attempts):
             _LOGGER.debug(
-                "Subscribed to weight characteristic (%s) notifications.",
-                self._weight_char_id,
+                "Connecting to %s (Attempt %d/%d)",
+                self.mac,
+                attempt + 1,
+                self._max_connect_attempts,
             )
-
             try:
+                if self._client and self._client.is_connected:
+                    _LOGGER.debug("Already connected to %s", self.mac)
+                    return
+
+                # Ensure client is fresh for each attempt if previous one failed
+                if self._client:
+                    await (
+                        self._client.disconnect()
+                    )  # Ensure cleanup of previous attempt
+                self._client = BleakClient(
+                    self.address_or_ble_device,
+                    disconnected_callback=self.device_disconnected_handler,
+                )
+
+                await self._client.connect()
+                self.connected = self._client.is_connected
+                _LOGGER.info("Connected to %s: %s", self.mac, self.connected)
+
+                if not self.connected:
+                    # This case should ideally be caught by BleakError or TimeoutError
+                    raise BookooDeviceNotFound(
+                        f"Failed to connect to {self.mac} after connect call, but no exception from Bleak."
+                    )
+
+                # Subscribe to notifications
                 await self._client.start_notify(
-                    self._command_char_id, self._internal_notification_handler
+                    self._weight_char_id, self._internal_notification_handler
                 )
                 _LOGGER.debug(
-                    "Subscribed to command characteristic (%s) notifications.",
-                    self._command_char_id,
+                    "Subscribed to weight characteristic (%s) notifications.",
+                    self._weight_char_id,
                 )
-            except Exception as e:
+
+                try:
+                    await self._client.start_notify(
+                        self._command_char_id, self._internal_notification_handler
+                    )
+                    _LOGGER.debug(
+                        "Subscribed to command characteristic (%s) notifications.",
+                        self._command_char_id,
+                    )
+                except (
+                    Exception
+                ) as e_notify_cmd:  # Catch specific exceptions if possible
+                    _LOGGER.warning(
+                        "Could not subscribe to command characteristic (%s) notifications on %s: %s. "
+                        "Auto-timer events from scale will not be detected.",
+                        self._command_char_id,
+                        self.mac,
+                        e_notify_cmd,
+                    )
+
+                if setup_tasks:
+                    self._setup_tasks()
+
+                return  # Successful connection
+
+            except (
+                BleakError,
+                asyncio.TimeoutError,
+            ) as e:  # BleakDeviceNotFoundError is a subclass of BleakError
                 _LOGGER.warning(
-                    "Could not subscribe to command characteristic (%s) notifications: %s. "
-                    "Auto-timer events from scale will not be detected.",
-                    self._command_char_id,
+                    "Connection attempt %d/%d to %s failed: %s (%s)",
+                    attempt + 1,
+                    self._max_connect_attempts,
+                    self.mac,
+                    type(e).__name__,
                     e,
                 )
+                self.connected = False
+                last_exception = e
+                if attempt < self._max_connect_attempts - 1:
+                    delay = self._initial_retry_delay * (2**attempt)
+                    _LOGGER.info(
+                        "Retrying connection to %s in %.2f seconds...", self.mac, delay
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    _LOGGER.error(
+                        "All %d connection attempts to %s failed.",
+                        self._max_connect_attempts,
+                        self.mac,
+                    )
+            except (
+                Exception
+            ) as e:  # Catch any other unexpected errors during connect sequence
+                _LOGGER.error(
+                    "Unexpected error during connection attempt %d/%d to %s: %s (%s)",
+                    attempt + 1,
+                    self._max_connect_attempts,
+                    self.mac,
+                    type(e).__name__,
+                    e,
+                    exc_info=True,
+                )
+                self.connected = False
+                last_exception = e  # Store it to be raised if all retries fail
+                # Break from retry loop for truly unexpected errors not related to BLE availability
+                break
 
-            if setup_tasks:
-                if self.process_queue_task and not self.process_queue_task.done():
-                    self.process_queue_task.cancel()
-                self.process_queue_task = asyncio.create_task(self.process_queue())
-                _LOGGER.debug("Queue processing task started for %s", self.mac)
-
-            if self._notify_callback:
-                self._notify_callback()
-
-        except BleakDeviceNotFoundError as ex:
-            self.connected = False
-            self.last_disconnect_time = time.time()
-            raise BookooDeviceNotFound(f"Device {self.mac} not found") from ex
-        except BleakError as ex:
-            self.connected = False
-            self.last_disconnect_time = time.time()
-            _LOGGER.error("BleakError while connecting to %s: %s", self.mac, ex)
-            raise BookooError(f"Error connecting to {self.mac}") from ex
-        except Exception as ex:
-            self.connected = False
-            self.last_disconnect_time = time.time()
-            _LOGGER.error(
-                "Unexpected error connecting to %s: %s", self.mac, ex, exc_info=True
+        # If loop finishes without successful return, all retries failed
+        if last_exception:
+            if isinstance(last_exception, BleakDeviceNotFoundError):
+                raise BookooDeviceNotFound(
+                    f"Device {self.mac} not found after {self._max_connect_attempts} attempts"
+                ) from last_exception
+            elif isinstance(last_exception, BleakError):  # Catches other BleakErrors
+                raise BookooError(
+                    f"Connection error for {self.mac} after {self._max_connect_attempts} attempts: {last_exception}"
+                ) from last_exception
+            elif isinstance(last_exception, asyncio.TimeoutError):
+                raise BookooError(
+                    f"Connection timeout for {self.mac} after {self._max_connect_attempts} attempts"
+                ) from last_exception
+            else:
+                raise BookooError(
+                    f"Unexpected connection error for {self.mac} after {self._max_connect_attempts} attempts: {last_exception}"
+                ) from last_exception
+        elif not self.connected:
+            # Fallback if no exception was stored but connection failed
+            raise BookooDeviceNotFound(
+                f"Failed to connect to {self.mac} after {self._max_connect_attempts} attempts, reason unknown."
             )
-            raise BookooError(f"Unexpected error connecting to {self.mac}") from ex
 
         if self.connected:
             return
@@ -554,7 +609,7 @@ class BookooScale:
             self._setup_tasks()
 
     def _setup_tasks(self) -> None:
-        """Set up background tasks."""
+        """Ensure background tasks, like queue processing, are created and running if not already active."""
         if not self.process_queue_task or self.process_queue_task.done():
             self.process_queue_task = asyncio.create_task(self.process_queue())
 
@@ -601,7 +656,11 @@ class BookooScale:
         characteristic: BleakGATTCharacteristic,  # pylint: disable=unused-argument
         data: bytearray,
     ) -> None:
-        """Receive data from scale."""
+        """Handle raw data received from Bluetooth characteristics (deprecated).
+
+        This method is kept for compatibility or specific low-level scenarios.
+        The primary data handling is done via _internal_notification_handler.
+        """
 
         # _LOGGER.debug("Received data: %s", ",".join(f"{byte:02x}" for byte in data))
 

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import logging
+from typing import TypedDict, Literal, Tuple, Union
 
 from .const import (
     WEIGHT_BYTE1,
@@ -12,6 +13,12 @@ from .const import (
     CMD_BYTE3_AUTO_TIMER_EVENT_STOP,
 )
 from .exceptions import BookooMessageError
+
+
+class AutoTimerEvent(TypedDict):
+    type: Literal["auto_timer"]
+    event: Literal["start", "stop"]
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +76,9 @@ class BookooMessage:
         # )
 
 
-def decode(byte_msg: bytearray) -> tuple[BookooMessage | dict | None, bytearray]:
+def decode(
+    byte_msg: bytearray,
+) -> Tuple[Union[BookooMessage, AutoTimerEvent, None], bytearray]:
     """Return a tuple - first element is the message, or None.
 
     The second element is the remaining bytes of the message.
@@ -123,10 +132,10 @@ def decode(byte_msg: bytearray) -> tuple[BookooMessage | dict | None, bytearray]
 
         if byte_msg[2] == CMD_BYTE3_AUTO_TIMER_EVENT_START:  # Auto-timer Start event
             _LOGGER.debug("Found auto-timer start command message")
-            return ({"type": "auto_timer", "event": "start"}, bytearray())
+            return (AutoTimerEvent(type="auto_timer", event="start"), bytearray())
         elif byte_msg[2] == CMD_BYTE3_AUTO_TIMER_EVENT_STOP:  # Auto-timer Stop event
             _LOGGER.debug("Found auto-timer stop command message")
-            return ({"type": "auto_timer", "event": "stop"}, bytearray())
+            return (AutoTimerEvent(type="auto_timer", event="stop"), bytearray())
         else:
             _LOGGER.debug(
                 "Known command prefix (0x030D) but unknown event: %s", byte_msg.hex()
