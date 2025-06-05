@@ -437,27 +437,35 @@ class BookooScale:
     async def connect(
         self,
         setup_tasks: bool = True,
+        attempts: int | None = None,  # Allow overriding connection attempts
     ) -> None:
         """Connect the bluetooth client with retry logic."""
         last_exception: Exception | None = None
 
-        for attempt in range(self._max_connect_attempts):
+        # Determine the number of connection attempts
+        num_attempts_to_try: int
+        if attempts is not None:
+            num_attempts_to_try = max(
+                1, attempts
+            )  # Ensure at least 1 attempt if specified
+        else:
+            num_attempts_to_try = self._max_connect_attempts
+
+        for attempt_num in range(num_attempts_to_try):
             _LOGGER.debug(
                 "Connecting to %s (Attempt %d/%d)",
                 self.mac,
-                attempt + 1,
-                self._max_connect_attempts,
+                attempt_num + 1,
+                num_attempts_to_try,
             )
             try:
                 if self._client and self._client.is_connected:
                     _LOGGER.debug("Already connected to %s", self.mac)
-                    return
+                    return  # Already connected
 
                 # Ensure client is fresh for each attempt if previous one failed
                 if self._client:
-                    await (
-                        self._client.disconnect()
-                    )  # Ensure cleanup of previous attempt
+                    await self._client.disconnect()  # Ensure cleanup
                 self._client = BleakClient(
                     self.address_or_ble_device,
                     disconnected_callback=self.device_disconnected_handler,
@@ -468,7 +476,6 @@ class BookooScale:
                 _LOGGER.info("Connected to %s: %s", self.mac, self.connected)
 
                 if not self.connected:
-                    # This case should ideally be caught by BleakError or TimeoutError
                     raise BookooDeviceNotFound(
                         f"Failed to connect to {self.mac} after connect call, but no exception from Bleak."
                     )
@@ -504,24 +511,29 @@ class BookooScale:
                 if setup_tasks:
                     self._setup_tasks()
 
+                _LOGGER.info(
+                    "Successfully connected to %s after %d attempt(s).",
+                    self.mac,
+                    attempt_num + 1,
+                )
                 return  # Successful connection
 
             except (
                 BleakError,
                 asyncio.TimeoutError,
-            ) as e:  # BleakDeviceNotFoundError is a subclass of BleakError
+            ) as e:  # Covers BleakDeviceNotFoundError
                 _LOGGER.warning(
                     "Connection attempt %d/%d to %s failed: %s (%s)",
-                    attempt + 1,
-                    self._max_connect_attempts,
+                    attempt_num + 1,
+                    num_attempts_to_try,
                     self.mac,
                     type(e).__name__,
                     e,
                 )
                 self.connected = False
                 last_exception = e
-                if attempt < self._max_connect_attempts - 1:
-                    delay = self._initial_retry_delay * (2**attempt)
+                if attempt_num + 1 < num_attempts_to_try:
+                    delay = self._initial_retry_delay * (2**attempt_num)
                     _LOGGER.info(
                         "Retrying connection to %s in %.2f seconds...", self.mac, delay
                     )
@@ -529,16 +541,16 @@ class BookooScale:
                 else:
                     _LOGGER.error(
                         "All %d connection attempts to %s failed.",
-                        self._max_connect_attempts,
+                        num_attempts_to_try,
                         self.mac,
                     )
             except (
                 Exception
-            ) as e:  # Catch any other unexpected errors during connect sequence
+            ) as e:  # Catch any other unexpected errors during this specific attempt
                 _LOGGER.error(
                     "Unexpected error during connection attempt %d/%d to %s: %s (%s)",
-                    attempt + 1,
-                    self._max_connect_attempts,
+                    attempt_num + 1,
+                    num_attempts_to_try,
                     self.mac,
                     type(e).__name__,
                     e,
@@ -546,31 +558,30 @@ class BookooScale:
                 )
                 self.connected = False
                 last_exception = e  # Store it to be raised if all retries fail
-                # Break from retry loop for truly unexpected errors not related to BLE availability
-                break
+                break  # Break from retry loop for truly unexpected errors not related to BLE availability
 
         # If loop finishes without successful return, all retries failed
         if last_exception:
             if isinstance(last_exception, BleakDeviceNotFoundError):
                 raise BookooDeviceNotFound(
-                    f"Device {self.mac} not found after {self._max_connect_attempts} attempts"
+                    f"Device {self.mac} not found after {num_attempts_to_try} attempts"
                 ) from last_exception
             elif isinstance(last_exception, BleakError):  # Catches other BleakErrors
                 raise BookooError(
-                    f"Connection error for {self.mac} after {self._max_connect_attempts} attempts: {last_exception}"
+                    f"Connection error for {self.mac} after {num_attempts_to_try} attempts: {last_exception}"
                 ) from last_exception
             elif isinstance(last_exception, asyncio.TimeoutError):
                 raise BookooError(
-                    f"Connection timeout for {self.mac} after {self._max_connect_attempts} attempts"
+                    f"Connection timeout for {self.mac} after {num_attempts_to_try} attempts"
                 ) from last_exception
             else:
                 raise BookooError(
-                    f"Unexpected connection error for {self.mac} after {self._max_connect_attempts} attempts: {last_exception}"
+                    f"Unexpected connection error for {self.mac} after {num_attempts_to_try} attempts: {last_exception}"
                 ) from last_exception
         elif not self.connected:
             # Fallback if no exception was stored but connection failed
             raise BookooDeviceNotFound(
-                f"Failed to connect to {self.mac} after {self._max_connect_attempts} attempts, reason unknown."
+                f"Failed to connect to {self.mac} after {num_attempts_to_try} attempts, reason unknown."
             )
 
         if self.connected:
