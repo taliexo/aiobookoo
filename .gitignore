@@ -204,3 +204,6 @@ lerna-debug.log*
 pip-wheel-metadata/
 
 *.ruff_cache
+
+# Windsurf
+.windsurf
