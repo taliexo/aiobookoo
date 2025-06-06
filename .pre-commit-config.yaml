@@ -2,37 +2,27 @@
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0 # Or a more recent version
+    rev: v5.0.0
     hooks:
     -   id: trailing-whitespace
     -   id: end-of-file-fixer
     -   id: check-yaml
     -   id: check-toml
-        exclude: ^pyproject\.toml$ # Exclude pyproject.toml if ruff handles it
     -   id: check-merge-conflict
     -   id: debug-statements
 
 -   repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff version. Optional: Fix to a specific version to manage updates explicitly.
-    rev: v0.5.0 # Or a more recent ruff version
+    rev: v0.11.13
     hooks:
     -   id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
-        # Respect pyproject.toml settings
+        args: [--fix]
     -   id: ruff-format
-        # Respect pyproject.toml settings
 
 -   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.0 # Or a more recent mypy version
+    rev: v1.16.0
     hooks:
     -   id: mypy
         args: [--config-file=mypy.ini]
         additional_dependencies:
-          # Add dependencies mypy needs that are in your project, e.g.:
-          - bleak>=0.20.2
-          - pytest # For LogCaptureFixture if tests are checked
-        exclude: ^(run\.py|test\.py)$ # Exclude these files at pre-commit level for mypy
-          # Add other direct dependencies of aiobookoov2 if mypy needs them
-          # Also add 'types-*' stubs if you use any explicitly
-        # Pass --install-types to install missing stubs for third-party libraries
-        # However, mypy.ini already handles ignoring missing imports for bleak.
+          - bleak>=0.22.3
+          - pytest

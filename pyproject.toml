@@ -17,10 +17,10 @@ classifiers = [
     "Intended Audience :: Developers",
     "Natural Language :: English",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
-dependencies = ["bleak >= 0.20.2"]
-requires-python = ">= 3.12"
+dependencies = ["bleak >= 0.22.3"]
+requires-python = ">= 3.13"
 
 [project.urls]
 Homepage = "https://github.com/taliexo/aiobookoo"
@@ -30,11 +30,11 @@ Documentation = "https://github.com/taliexo/aiobookoo"
 [project.optional-dependencies]
 dev = [
     "covdefaults == 2.3.0",
-    "coverage == 7.6.7",
-    "syrupy == 4.7.2",
-    "pytest == 8.3.3",
-    "pytest-asyncio == 0.24.0",
-    "pytest-cov == 6.0.0",
+    "coverage == 7.8.2",
+    "syrupy == 4.9.1",
+    "pytest == 8.4.0",
+    "pytest-asyncio == 1.0.0",
+    "pytest-cov == 6.1.1",
 ]
 
 [tool.setuptools.package-data]

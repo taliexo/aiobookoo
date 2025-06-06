@@ -24,8 +24,8 @@ This library is primarily designed to be used by the [Bookoo Home Assistant inte
 
 ## Requirements
 
-*   Python 3.12+
-*   `bleak>=0.20.2`
+*   Python 3.13
+*   `bleak>=0.22.3`
 *   A Bluetooth adapter compatible with `bleak` on your system.
 
 ## Installation
