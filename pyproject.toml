@@ -1,6 +1,6 @@
 [project]
 name = "aiobookoov2"
-version = "0.3.6"
+version = "0.3.7"
 license = "MIT"  # SPDX identifier for MIT License
 description = "Async Python library for Bookoo BLE scales (v2 fork by taliexo)"
 readme = "README.md"
@@ -19,8 +19,8 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.13",
 ]
-dependencies = ["bleak >= 0.22.3"]
-requires-python = ">= 3.13"
+dependencies = ["bleak >= 0.22.0"]
+requires-python = ">= 3.12"
 
 [project.urls]
 Homepage = "https://github.com/taliexo/aiobookoo"
