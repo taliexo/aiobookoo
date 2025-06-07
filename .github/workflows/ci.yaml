@@ -1,4 +1,4 @@
-name: CI Checks for aiobookoo
+name: CI Checks for pybookoo
 
 on:
   push:
@@ -40,7 +40,7 @@ jobs:
         run: ruff format --check .
 
       - name: Run MyPy Type Checker
-        run: mypy --config-file=mypy.ini aiobookoov2/
+        run: mypy --config-file=mypy.ini pybookoo/
 
       - name: Run Pytest
         run: pytest tests/

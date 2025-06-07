@@ -1,4 +1,4 @@
-"""Exceptions for aiobookoo."""
+"""Exceptions for pybookoo."""
 
 from bleak.exc import BleakDeviceNotFoundError, BleakError
 

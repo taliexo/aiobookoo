@@ -1,8 +1,8 @@
 import logging  # For caplog
 from pytest import LogCaptureFixture
 
-from aiobookoov2.decode import decode, BookooMessage
-from aiobookoov2.const import (
+from pybookoo.decode import decode, BookooMessage
+from pybookoo.const import (
     WEIGHT_BYTE1,
     WEIGHT_BYTE2,
     CMD_BYTE1_PRODUCT_NUMBER,
@@ -105,11 +105,11 @@ AUTO_TIMER_STOP_PAYLOAD = AUTO_TIMER_STOP_PAYLOAD_NO_CS[:-1] + bytes(
 )
 
 
-class TestAioBookooDecode:
+class TestpybookooDecode:
     def test_decode_valid_weight_message(
         self, caplog: LogCaptureFixture
     ) -> None:  # Add caplog
-        caplog.set_level(logging.DEBUG, logger="aiobookoo.decode")  # Set level
+        caplog.set_level(logging.DEBUG, logger="pybookoo.decode")  # Set level
         msg, remaining = decode(VALID_WEIGHT_PAYLOAD)
         assert isinstance(msg, BookooMessage)
         assert msg.weight == 10.00

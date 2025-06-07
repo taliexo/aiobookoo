@@ -1,4 +1,4 @@
-"""Constants for aiobookoo."""
+"""Constants for pybookoo."""
 
 from enum import StrEnum
 from typing import Final

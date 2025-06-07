@@ -1,6 +1,6 @@
-# aiobookoov2
+# pybookoo
 
-**aiobookoov2** is an asynchronous Python library for interacting with Bookoo Themis Mini coffee scales over Bluetooth Low Energy (BLE). It is based on the `aioacaia` library and utilizes `asyncio` and `bleak` for its operations.
+**pybookoo** is an asynchronous Python library for interacting with Bookoo Themis Mini coffee scales over Bluetooth Low Energy (BLE). It is based on the `aioacaia` library and utilizes `asyncio` and `bleak` for its operations.
 
 This library is primarily designed to be used by the [Bookoo Home Assistant integration](https://github.com/taliexo/bookoo) but can also be used as a standalone library for other projects.
 
@@ -30,16 +30,16 @@ This library is primarily designed to be used by the [Bookoo Home Assistant inte
 
 ## Installation
 
-You can install `aiobookoov2` directly from PyPI:
+You can install `pybookoo` directly from PyPI:
 
 ```bash
-pip install aiobookoov2
+pip install pybookoo
 ```
 
 To install for development:
 ```bash
-git clone https://github.com/taliexo/aiobookoo.git
-cd aiobookoo
+git clone https://github.com/taliexo/pybookoo.git
+cd pybookoo
 pip install -e .[dev]
 ```
 
@@ -51,19 +51,19 @@ Here's a simple example of how to connect to a scale and receive updates:
 import asyncio
 import logging
 from bleak import BleakScanner
-from aiobookoov2 import BookooScale, UPDATE_SOURCE_WEIGHT_CHAR, UPDATE_SOURCE_COMMAND_CHAR
+from pybookoo import BookooScale, UPDATE_SOURCE_WEIGHT_CHAR, UPDATE_SOURCE_COMMAND_CHAR
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger(__name__)
-# For more detailed bleak/aiobookoov2 logs, set level to DEBUG:
-# logging.getLogger("aiobookoov2").setLevel(logging.DEBUG)
+# For more detailed bleak/pybookoo logs, set level to DEBUG:
+# logging.getLogger("pybookoo").setLevel(logging.DEBUG)
 # logging.getLogger("bleak").setLevel(logging.DEBUG)
 
 
 TARGET_SCALE_ADDRESS = "XX:XX:XX:XX:XX:XX"  # Replace with your scale's MAC address
 # Or discover automatically:
-# from aiobookoov2.helpers import find_bookoo_devices
+# from pybookoo.helpers import find_bookoo_devices
 # async def discover():
 #     devices = await find_bookoo_devices(timeout=10.0)
 #     if devices:
@@ -136,7 +136,7 @@ To set up for development:
 Run checks manually:
 *   `ruff check .`
 *   `ruff format .`
-*   `mypy --config-file=mypy.ini aiobookoov2/`
+*   `mypy --config-file=mypy.ini pybookoo/`
 *   `pytest tests/`
 
 ## Contributing

@@ -6,7 +6,7 @@ updates:
     schedule:
       interval: "daily"
     target-branch: "main" # Or your primary development branch
-    # For aiobookoo, if you want to group dev dependency updates:
+    # For pybookoo, if you want to group dev dependency updates:
     # groups:
     #   dev-dependencies:
     #     dependency-type: "development"

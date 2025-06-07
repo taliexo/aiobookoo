@@ -1,6 +1,6 @@
 import asyncio
 
-from aiobookoo import BookooScale
+from pybookoo import BookooScale
 
 
 async def main():
