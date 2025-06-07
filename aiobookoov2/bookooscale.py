@@ -522,7 +522,7 @@ class BookooScale:
                 BleakError,
                 asyncio.TimeoutError,
             ) as e:  # Covers BleakDeviceNotFoundError
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "Connection attempt %d/%d to %s failed: %s (%s)",
                     attempt_num + 1,
                     num_attempts_to_try,
@@ -539,7 +539,7 @@ class BookooScale:
                     )
                     await asyncio.sleep(delay)
                 else:
-                    _LOGGER.error(
+                    _LOGGER.debug(
                         "All %d connection attempts to %s failed.",
                         num_attempts_to_try,
                         self.mac,
